@@ -9,6 +9,8 @@ import json
 import logging
 import socket
 import sys
+import select
+import time
 
 
 import aepsych.utils_logging as utils_logging
@@ -93,52 +95,90 @@ class PySocket(object):
             )
         else:
             self.socket = socket.create_server(addr)
-        self.conn = None
+
+        self.conn, self.addr = None, None
 
     def close(self):
         self.socket.close()
 
-    def receive(self):
-        # catch the Error and reset the connection
-        
-        while True:
-            if self.conn is None:
-                logger.info("Waiting for connection...")
-                self.conn, self.addr = self.socket.accept()
-                logger.info(f"Connected by {self.addr}, waiting for messages...")
-                self.conn.settimeout(0.0)
-                #Set the conn socket to nonblocking
-            try:  
-                recv_result = self.conn.recv(1024 * 512)  # 512KiB
-            except Exception as e:
+    def return_socket(self):
+        return self.socket
 
-                #Catch the exception of no input. The ErrorCode is 10035
-                if e.args[0] == 10035:
-                    continue
-                #Be all catchall for exceptions
-                else:
-                    logger.info(e)
-                    sys.exit(1)
-            else:
-                try:           
-                    msg = json.loads(recv_result)
-                    logger.debug(f"receive : result = {recv_result}")
-                    logger.info(f"Got: {msg}")
-                    return msg
+    def accept_client(self):
+        client_not_connected = True
+        logger.info("Waiting for connection...")
+
+        while client_not_connected:
+            rlist, wlist, xlist = select.select([self.socket], [], [], 0)
+            if rlist:
+                for sock in rlist:
+                    try:
+                        self.conn, self.addr = sock.accept()
+                        logger.info(
+                            f"Connected by {self.addr}, waiting for messages...")
+                        client_not_connected = False
+                    except Exception as e:
+                        logger.info(
+                            f'Connection to client failed with error {e}')
+
+    def receive(self, server_exiting):
+
+        # Set up the logic for reading using select.
+        # Setting the timeout to 0 makes it nonblocking.
+        # Magic Number tweaking can be made with the timeout to cut down CPU Usages vs User Experience
+
+        while not server_exiting:
+            rlist, wlist, xlist = select.select([self.conn], [], [], 0)
+            for sock in rlist:
+                try:
+                    if rlist:
+                        recv_result = sock.recv(1024*512)
+                        msg = json.loads(recv_result)
+                        logger.debug(f"receive : result = {recv_result}")
+                        logger.info(f"Got: {msg}")
+                        return msg
                 except Exception as e:
-                    self.conn.close()
-                    self.conn, self.addr = None, None
-                    logger.info(
-                            "Exception caught while trying to receive a message from the client. "
-                            f"Ignoring message and trying again. The caught exception was: {e}."
-                    )
+                    logger.info(f'Failed with error {e}')
+                    return "bad request"
 
+    # def receive(self):
 
+    #     while True:
+    #         if self.conn is None:
+    #             logger.info("Waiting for connection...")
+    #             self.conn, self.addr = self.socket.accept()
+    #             logger.info(f"Connected by {self.addr}, waiting for messages...")
+    #             self.conn.settimeout(0.0)
+    #             #Set the conn socket to nonblocking
+    #         try:
+    #             recv_result = self.conn.recv(1024 * 512)  # 512KiB
+    #         except Exception as e:
 
+    #             #Catch the exception of no input. The ErrorCode is 10035
+    #             if e.args[0] == 10035:
+    #                 continue
+    #             #Be all catchall for exceptions
+    #             else:
+    #                 logger.info(e)
+    #                 sys.exit(1)
+    #         else:
+    #             try:
+    #                 msg = json.loads(recv_result)
+    #                 logger.debug(f"receive : result = {recv_result}")
+    #                 logger.info(f"Got: {msg}")
+    #                 return msg
+    #             except Exception as e:
+    #                 self.conn.close()
+    #                 self.conn, self.addr = None, None
+    #                 logger.info(
+    #                         "Exception caught while trying to receive a message from the client. "
+    #                         f"Ignoring message and trying again. The caught exception was: {e}."
+    #                 )
 
     def send(self, message):
         if self.conn is None:
             logger.error("No connection to send to!")
+
             return
         if type(message) == str:
             pass  # keep it as-is

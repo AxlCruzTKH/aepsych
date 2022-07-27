@@ -28,7 +28,8 @@ logger = utils_logging.getLogger(logging.INFO)
 
 
 def get_next_filename(folder, fname, ext):
-    n = sum(1 for f in os.listdir(folder) if os.path.isfile(os.path.join(folder, f)))
+    n = sum(1 for f in os.listdir(folder)
+            if os.path.isfile(os.path.join(folder, f)))
     return f"{folder}/{fname}_{n+1}.{ext}"
 
 
@@ -62,24 +63,25 @@ class AEPsychServer(object):
 
         self.debug = False
         self.is_using_thrift = thrift
-
-
-        self.receiverThread = threading.Thread(target=self._receive_send,daemon=True)
-
+        self.receive_thread = threading.Thread(
+            target=self._receive_send, args=(self.exit_server_loop,), daemon=True)
 
         self.queue = []
 
     def cleanup(self):
         self.socket.close()
 
-    def _receive_send(self):
+    def _receive_send(self, is_exiting):
         while True:
-            request = self.socket.receive()
-            self.queue.append(request)
+            request = self.socket.receive(is_exiting)
+            if request != 'bad request':
+                self.queue.append(request)
+            else:
+                logger.info(
+                    'Malformed Message Received, please check Documentation.')
             if self.exit_server_loop:
                 break
         logger.info('Terminated Input Thread')
-
 
     def handle_queue(self):
         if self.queue:
@@ -94,7 +96,6 @@ class AEPsychServer(object):
                 logger.warning(f"Request '{request}' raised error '{e}'")
             self.queue.pop(0)
         self.socket.send(result)
-
 
     def serve(self):
         """Run the server. Note that all configuration outside of socket type and port
@@ -112,12 +113,12 @@ class AEPsychServer(object):
         logger.info("Ctrl-C to quit!")
         # yeah we're not sanitizing input at all
 
-        
-        self.receiverThread.start()       
-
+        # Start the method to accept a client connection
+        self.socket.accept_client()
+        self.receive_thread.start()
 
         if self.is_using_thrift is True:
-            self.handle_queue()
+            self.receive(self.exit_server_loop)
         else:
             while True:
                 self.handle_queue()
@@ -133,7 +134,8 @@ class AEPsychServer(object):
         if skip_computations is true, skip all the asks and queries, which should make the replay much faster.
         """
         if uuid_to_replay is None:
-            raise RuntimeError("UUID is a required parameter to perform a replay")
+            raise RuntimeError(
+                "UUID is a required parameter to perform a replay")
 
         if self.db is None:
             raise RuntimeError("A database is required to perform a replay")
@@ -155,7 +157,8 @@ class AEPsychServer(object):
 
         for result in master_record.children_replay:
             request = result.message_contents
-            logger.debug(f"replay - type = {result.message_type} request = {request}")
+            logger.debug(
+                f"replay - type = {result.message_type} request = {request}")
             if (
                 request["type"] == "ask" or request["type"] == "query"
             ) and skip_computations is True:
@@ -269,7 +272,8 @@ class AEPsychServer(object):
 
         recs = self.db.get_replay_for(uuid_of_replay)
 
-        strats = self.get_strats_from_replay(uuid_of_replay, force_replay=force_replay)
+        strats = self.get_strats_from_replay(
+            uuid_of_replay, force_replay=force_replay)
 
         out = pd.DataFrame(
             [
@@ -479,7 +483,8 @@ class AEPsychServer(object):
             buffer = io.BytesIO()
             torch.save(self.strat, buffer, pickle_module=dill)
             buffer.seek(0)
-            self.db.record_strat(master_table=self._db_master_record, strat=buffer)
+            self.db.record_strat(
+                master_table=self._db_master_record, strat=buffer)
 
         return "acq"
 
@@ -500,7 +505,8 @@ class AEPsychServer(object):
                 master_table=self._db_master_record, type="parameters", request=request
             )
         config_setup = {
-            self.parnames[i]: [self.strat.lb[i].item(), self.strat.ub[i].item()]
+            self.parnames[i]: [
+                self.strat.lb[i].item(), self.strat.ub[i].item()]
             for i in range(len(self.parnames))
         }
         return config_setup
@@ -558,7 +564,8 @@ class AEPsychServer(object):
             response["y"] = mean.item()
         elif query_type == "inverse":
             # expect constraints to be a dictionary; values are float arrays size 1 (exact) or 2 (upper/lower bnd)
-            constraints = {self.parnames.index(k): v for k, v in constraints.items()}
+            constraints = {self.parnames.index(
+                k): v for k, v in constraints.items()}
             nearest_y, nearest_loc = self.strat.inv_query(
                 y, constraints, probability_space=probability_space
             )
@@ -584,7 +591,7 @@ class AEPsychServer(object):
         # If using thrift, it will add 'Terminate' to the queue and pass it to thrift server level
         return "Terminate"
 
-    ### Properties that are set on a per-strat basis
+    # Properties that are set on a per-strat basis
     @property
     def strat(self):
         if self.strat_id == -1:
@@ -661,7 +668,7 @@ class AEPsychServer(object):
         else:
             unpacked = [config[name] for name in self.parnames]
 
-            ### we want x.shape to be
+            # we want x.shape to be
             # [batch, d] or [d] for single and [batch, d, 2]  or [d, 2]
             # for pairwise. This means we have to transpose for pairwise but not single
             # which is pretty terrible (since the same data has different semantics
@@ -712,11 +719,12 @@ class AEPsychServer(object):
             for i in config["experiment"]:
                 config["common"][i] = config["experiment"][i]
             del config["experiment"]
-        self.db.record_config(master_table=self._db_master_record, config=config)
+        self.db.record_config(
+            master_table=self._db_master_record, config=config)
         return self._configure(config)
 
     def __getstate__(self):
-        ### nuke the socket since it's not pickleble
+        # nuke the socket since it's not pickleble
         state = self.__dict__.copy()
         del state["socket"]
         del state["db"]
@@ -729,11 +737,13 @@ class AEPsychServer(object):
                 buffer = io.BytesIO()
                 torch.save(strat, buffer, pickle_module=dill)
                 buffer.seek(0)
-                self.db.record_strat(master_table=self._db_master_record, strat=buffer)
+                self.db.record_strat(
+                    master_table=self._db_master_record, strat=buffer)
 
     def generate_debug_info(self, exception_type, dumptype):
         fname = get_next_filename(".", dumptype, "pkl")
-        logger.exception(f"Got {exception_type}, exiting! Server dump in {fname}")
+        logger.exception(
+            f"Got {exception_type}, exiting! Server dump in {fname}")
         dill.dump(self, open(fname, "wb"))
 
 
@@ -750,7 +760,8 @@ def startServerAndRun(
         if socket is not None:
             if uuid_of_replay is not None:
                 server.replay(uuid_of_replay, skip_computations=True)
-                server._db_master_record = server.db.get_master_record(uuid_of_replay)
+                server._db_master_record = server.db.get_master_record(
+                    uuid_of_replay)
             server.serve()
         else:
             if config_path is not None:
@@ -851,7 +862,8 @@ def start_server(server_class, args):
             elif "replay" in args and args.replay is not None:
                 logger.info(f"Attempting to replay {args.replay}")
                 if args.resume is True:
-                    sock = createSocket(socket_type=args.socket_type, port=args.port)
+                    sock = createSocket(
+                        socket_type=args.socket_type, port=args.port)
                     logger.info(f"Will resume {args.replay}")
                 else:
                     sock = None
@@ -869,10 +881,12 @@ def start_server(server_class, args):
                     database.perform_updates()
                     logger.info(f"- updated database {database_path}")
                 else:
-                    logger.info(f"- update not needed for database {database_path}")
+                    logger.info(
+                        f"- update not needed for database {database_path}")
             else:
                 logger.info(f"Setting the database path {database_path}")
-                sock = createSocket(socket_type=args.socket_type, port=args.port)
+                sock = createSocket(
+                    socket_type=args.socket_type, port=args.port)
                 startServerAndRun(
                     server_class,
                     database_path=database_path,
@@ -881,7 +895,8 @@ def start_server(server_class, args):
                 )
         else:
             sock = createSocket(socket_type=args.socket_type, port=args.port)
-            startServerAndRun(server_class, socket=sock, config_path=args.stratconfig)
+            startServerAndRun(server_class, socket=sock,
+                              config_path=args.stratconfig)
 
     except (KeyboardInterrupt, SystemExit):
         logger.exception("Got Ctrl+C, exiting!")
