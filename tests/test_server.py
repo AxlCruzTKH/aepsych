@@ -7,10 +7,10 @@
 
 import json
 import logging
+import select
 import unittest
 import uuid
-from unittest.mock import MagicMock, call, patch
-import select
+from unittest.mock import call, MagicMock, patch
 
 import aepsych.server as server
 import aepsych.utils_logging as utils_logging
@@ -53,8 +53,7 @@ class ServerTestCase(unittest.TestCase):
         socket = server.sockets.PySocket(port=0)
         # random datebase path name without dashes
         database_path = "./{}.db".format(str(uuid.uuid4().hex))
-        self.s = server.AEPsychServer(
-            socket=socket, database_path=database_path)
+        self.s = server.AEPsychServer(socket=socket, database_path=database_path)
 
     def tearDown(self):
         self.s.cleanup()
@@ -246,8 +245,7 @@ class ServerTestCase(unittest.TestCase):
         self.s.unversioned_handler = MagicMock()
         self.s.replay(self.s._db_master_record.experiment_id)
         print(f"replay called with check = {test_calls}")
-        self.s.unversioned_handler.assert_has_calls(
-            test_calls, any_order=False)
+        self.s.unversioned_handler.assert_has_calls(test_calls, any_order=False)
 
     def test_replay_server_skip_computations(self):
         test_calls = []
@@ -289,13 +287,10 @@ class ServerTestCase(unittest.TestCase):
         self.s.versioned_handler(setup_request)
         self.s.strat.has_model = False
 
-        self.s.replay(self.s._db_master_record.experiment_id,
-                      skip_computations=True)
+        self.s.replay(self.s._db_master_record.experiment_id, skip_computations=True)
         print(f"replay called with check = {test_calls}")
-        self.s.unversioned_handler.assert_has_calls(
-            test_calls, any_order=False)
-        self.assertEqual(
-            self.s.unversioned_handler.call_count, len(test_calls))
+        self.s.unversioned_handler.assert_has_calls(test_calls, any_order=False)
+        self.assertEqual(self.s.unversioned_handler.call_count, len(test_calls))
 
     def test_final_strat_serialization(self):
         setup_request = {
@@ -551,22 +546,19 @@ class ServerTestCase(unittest.TestCase):
         message3 = {"message": {"target": "test request"}}  # valid message
         message_list = [message1, message2, json.dumps(message3)]
 
-        i = 0
         self.s.socket.conn = MagicMock()
 
-        for message in message_list:
-            select.select = MagicMock(
-                return_value=[[self.s.socket.conn], [], []])
+        for i, message in enumerate(message_list):
+            select.select = MagicMock(return_value=[[self.s.socket.conn], [], []])
             self.s.socket.conn.recv = MagicMock(return_value=message)
             if i != 2:
-                self.assertEqual(self.s.socket.receive(False), 'bad request')
-                i += 1
+                self.assertEqual(self.s.socket.receive(False), "bad request")
             else:
                 self.assertEqual(self.s.socket.receive(False), message3)
 
     def test_serve_versioned_handler(self):
         """Tests that the full pipeline is working. Message should go from _receive_send to handle_queue
-            to the version handler"""
+        to the version handler"""
         request = {"version": 0}
         self.s.socket.receive = MagicMock(return_value=request)
         self.s.socket.accept_client = MagicMock()
@@ -600,6 +592,18 @@ class ServerTestCase(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.s.serve()
         self.s.socket.send.assert_called_once_with("bad request")
+
+    def test_queue(self):
+        """Test to see that the queue is being handled correctly"""
+
+        self.s.socket.accept_client = MagicMock()
+        ask_request = {"type": "ask", "message": ""}
+        self.s.socket.receive = MagicMock(return_value=ask_request)
+        self.s.socket.send = MagicMock()
+        self.s.exit_server_loop = True
+        with self.assertRaises(SystemExit):
+            self.s.serve()
+        assert len(self.s.queue) == 0
 
 
 if __name__ == "__main__":

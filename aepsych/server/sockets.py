@@ -7,17 +7,18 @@
 
 import json
 import logging
+import select
 import socket
 import sys
-import select
 import time
-
+from http.client import BAD_REQUEST
 
 import aepsych.utils_logging as utils_logging
 import numpy as np
 import zmq
 
 logger = utils_logging.getLogger(logging.INFO)
+BAD_REQUEST = "bad request"
 
 
 def SimplifyArrays(message):
@@ -115,65 +116,35 @@ class PySocket(object):
                     try:
                         self.conn, self.addr = sock.accept()
                         logger.info(
-                            f"Connected by {self.addr}, waiting for messages...")
+                            f"Connected by {self.addr}, waiting for messages..."
+                        )
                         client_not_connected = False
                     except Exception as e:
-                        logger.info(
-                            f'Connection to client failed with error {e}')
+                        logger.info(f"Connection to client failed with error {e}")
+                        raise Exception
 
     def receive(self, server_exiting):
 
-        # Set up the logic for reading using select.
-        # Setting the timeout to 0 makes it nonblocking.
-        # Magic Number tweaking can be made with the timeout to cut down CPU Usages vs User Experience
+        # Using the select module allows you to pass a collection of sockets that the filesystem is scanning for changes.
+        # Select takes 3 lists as input, lists that contain sockets to poll. These polled sockets will be checked to see if they are readable,writeable,or contain an error.
+        # It also takes in 1 optional input, the timeout.
+        # setting the timeout to 0 makes it constantly poll the sockets for their status. In this case, the socket is being polled constantly to see if anything was written to it.
+        # this is expensive and not best behavior, but it makes for a more seamless experience, as if there is a timeout, the socket will actively block, which makes it difficult
+        # to scan for serverside instructions, such as a shutdown message.
 
         while not server_exiting:
             rlist, wlist, xlist = select.select([self.conn], [], [], 0)
             for sock in rlist:
                 try:
                     if rlist:
-                        recv_result = sock.recv(1024*512)
+                        recv_result = sock.recv(1024 * 512)
                         msg = json.loads(recv_result)
                         logger.debug(f"receive : result = {recv_result}")
                         logger.info(f"Got: {msg}")
                         return msg
                 except Exception as e:
-                    logger.info(f'Failed with error {e}')
-                    return "bad request"
-
-    # def receive(self):
-
-    #     while True:
-    #         if self.conn is None:
-    #             logger.info("Waiting for connection...")
-    #             self.conn, self.addr = self.socket.accept()
-    #             logger.info(f"Connected by {self.addr}, waiting for messages...")
-    #             self.conn.settimeout(0.0)
-    #             #Set the conn socket to nonblocking
-    #         try:
-    #             recv_result = self.conn.recv(1024 * 512)  # 512KiB
-    #         except Exception as e:
-
-    #             #Catch the exception of no input. The ErrorCode is 10035
-    #             if e.args[0] == 10035:
-    #                 continue
-    #             #Be all catchall for exceptions
-    #             else:
-    #                 logger.info(e)
-    #                 sys.exit(1)
-    #         else:
-    #             try:
-    #                 msg = json.loads(recv_result)
-    #                 logger.debug(f"receive : result = {recv_result}")
-    #                 logger.info(f"Got: {msg}")
-    #                 return msg
-    #             except Exception as e:
-    #                 self.conn.close()
-    #                 self.conn, self.addr = None, None
-    #                 logger.info(
-    #                         "Exception caught while trying to receive a message from the client. "
-    #                         f"Ignoring message and trying again. The caught exception was: {e}."
-    #                 )
+                    logger.error(f"Failed with error {e}")
+                    return BAD_REQUEST
 
     def send(self, message):
         if self.conn is None:
