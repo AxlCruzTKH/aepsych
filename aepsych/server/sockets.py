@@ -11,7 +11,6 @@ import select
 import socket
 import sys
 import time
-from http.client import BAD_REQUEST
 
 import aepsych.utils_logging as utils_logging
 import numpy as np

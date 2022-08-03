@@ -557,7 +557,7 @@ class ServerTestCase(unittest.TestCase):
                 self.assertEqual(self.s.socket.receive(False), message3)
 
     def test_serve_versioned_handler(self):
-        """Tests that the full pipeline is working. Message should go from _receive_send to handle_queue
+        """Tests that the full pipeline is working. Message should go from _receive_send to _handle_queue
         to the version handler"""
         request = {"version": 0}
         self.s.socket.receive = MagicMock(return_value=request)

@@ -23,6 +23,7 @@ from aepsych.config import Config
 from aepsych.server.sockets import createSocket, DummySocket
 from aepsych.strategy import SequentialStrategy
 
+BAD_REQUEST = "bad request"
 
 logger = utils_logging.getLogger(logging.INFO)
 
@@ -74,7 +75,7 @@ class AEPsychServer(object):
     def _receive_send(self, is_exiting):
         while True:
             request = self.socket.receive(is_exiting)
-            if request != "bad request":
+            if request != BAD_REQUEST:
                 self.queue.append(request)
             if self.exit_server_loop:
                 break
@@ -89,7 +90,7 @@ class AEPsychServer(object):
                 else:
                     result = self.unversioned_handler(request)
             except Exception as e:
-                result = "bad request"
+                result = BAD_REQUEST
                 logger.warning(f"Request '{request}' raised error '{e}'")
         self.socket.send(result)
 
@@ -117,7 +118,7 @@ class AEPsychServer(object):
             self.receive(self.exit_server_loop)
         else:
             while True:
-                self.handle_queue()
+                self._handle_queue()
                 if self.exit_server_loop:
                     break
             # Close the socket and terminate with code 0
